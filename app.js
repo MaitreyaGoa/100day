@@ -4,7 +4,7 @@
 // 1. Deploy Code.gs as an Apps Script Web App (Access: Anyone).
 // 2. Paste the deployment URL below.
 // ============================================================
-const API_URL = "PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE";
+const API_URL = "https://script.google.com/macros/s/AKfycbzQVO9LcwwOYctnO-r4TOpZe8P2uhkpZDytERcVLACZRO7hIUnvQAc3xqNHn32RFfhADw/exec";
 
 const DEFAULT_ITEMS = [
   { itemId: "nofood",   label: "No sugar / maida / deep-fried", timeLabel: "All day",        sortHour: -1, builtIn: true },
