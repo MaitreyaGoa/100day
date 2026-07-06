@@ -208,6 +208,15 @@
     background:none;border:none;color:var(--rust);font-size:12px;
     font-family:'IBM Plex Mono',monospace;cursor:pointer;padding:4px;
   }
+  .tl-edit{
+    background:none;border:none;color:var(--brass);font-size:13px;
+    cursor:pointer;padding:4px;
+  }
+  .edit-budget-link{
+    background:none;border:none;color:var(--brass);font-size:11px;
+    font-family:'IBM Plex Mono',monospace;cursor:pointer;letter-spacing:.04em;
+    white-space:nowrap;
+  }
 
   .section-eyebrow{
     font-family:'IBM Plex Mono',monospace;
@@ -287,8 +296,9 @@
     <p class="brand-sub">Enter your name to open your logbook. First day you log in is Day 1 — the clock starts then.</p>
     <form id="loginForm">
       <input type="text" id="nameInput" placeholder="Your name" autocomplete="off" required>
+      <input type="password" id="passwordInput" placeholder="Password" autocomplete="off" required>
       <button class="btn-primary" type="submit">Start / Continue</button>
-      <div class="login-note">Your name is your password. It's remembered on this device.</div>
+      <div class="login-note">Password is set by the admin and isn't saved on this device — you'll enter it each time.</div>
     </form>
   </div>
 
@@ -334,7 +344,8 @@
 
       <div class="money-block">
         <div class="money-row">
-          <span class="money-label">RUNNING BALANCE (₹150/day, rolls over)</span>
+          <span class="money-label" id="budgetLabel">RUNNING BALANCE (₹150/day, rolls over)</span>
+          <button class="edit-budget-link" id="editBudgetBtn">✎ edit</button>
         </div>
         <div class="balance-figure" id="balanceFigure">₹0</div>
         <div class="spend-input-row">
