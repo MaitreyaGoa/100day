@@ -10,6 +10,8 @@ let state = {
   name: null,
   password: null,
   startDate: null,
+  today: null,
+  selectedDate: null,
   dayNumber: 1,
   bestStreak: 0,
   currentStreak: 0,
@@ -75,17 +77,54 @@ async function doLogin(name, password) {
 async function loadData() {
   const data = await api("getData", { name: state.name, password: state.password });
   state.startDate = data.startDate;
+  state.today = data.today;
+  state.selectedDate = state.selectedDate || data.today;
   state.dayNumber = data.dayNumber;
   state.bestStreak = data.bestStreak || 0;
   state.dailyBudget = data.dailyBudget || 150;
   state.items = data.customItems || [];
   state.logs = data.logs || [];
-  state.checklist = data.todayLog ? JSON.parse(data.todayLog.checklist || "{}") : {};
-  state.spend = data.todayLog ? data.todayLog.spend : "";
   state.balance = data.dayNumber * state.dailyBudget - state.logs.reduce((sum, l) => sum + (parseFloat(l.spend) || 0), 0);
+  loadChecklistForDate(state.selectedDate);
   computeStreakLocal();
   render();
 }
+
+function loadChecklistForDate(dateStr) {
+  const log = state.logs.find((l) => l.date === dateStr);
+  state.checklist = log ? JSON.parse(log.checklist || "{}") : {};
+  state.spend = log ? log.spend : "";
+}
+
+function addDays(dateStr, delta) {
+  const d = new Date(dateStr + "T00:00:00");
+  d.setDate(d.getDate() + delta);
+  return d.toISOString().slice(0, 10);
+}
+
+function dayNumberForDate(dateStr) {
+  const start = new Date(state.startDate + "T00:00:00");
+  const d = new Date(dateStr + "T00:00:00");
+  return Math.round((d - start) / 86400000) + 1;
+}
+
+function formatDateLabel(dateStr) {
+  if (dateStr === state.today) return "Today";
+  if (dateStr === addDays(state.today, -1)) return "Yesterday";
+  const d = new Date(dateStr + "T00:00:00");
+  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+}
+
+function goToDate(dateStr) {
+  if (dateStr > state.today) dateStr = state.today;
+  if (dateStr < state.startDate) dateStr = state.startDate;
+  state.selectedDate = dateStr;
+  loadChecklistForDate(dateStr);
+  render();
+}
+
+$("prevDayBtn").addEventListener("click", () => goToDate(addDays(state.selectedDate, -1)));
+$("nextDayBtn").addEventListener("click", () => goToDate(addDays(state.selectedDate, 1)));
 
 function showApp() {
   $("loginView").style.display = "none";
@@ -112,6 +151,17 @@ function render() {
   $("dayNumLbl").textContent = state.dayNumber;
   $("streakNum").textContent = state.currentStreak;
   $("bestStreakNum").textContent = Math.max(state.bestStreak, state.currentStreak);
+
+  // date navigation
+  const isToday = state.selectedDate === state.today;
+  const dateLbl = $("selectedDateLbl");
+  dateLbl.textContent = isToday
+    ? "Today"
+    : `${formatDateLabel(state.selectedDate)} · Day ${dayNumberForDate(state.selectedDate)}`;
+  dateLbl.classList.toggle("editing", !isToday);
+  $("nextDayBtn").disabled = state.selectedDate >= state.today;
+  $("prevDayBtn").disabled = state.selectedDate <= state.startDate;
+  $("rosterEyebrow").textContent = isToday ? "Today's Roster" : "Editing Past Day";
 
   // punch row — last 20 logged days
   const row = $("punchRow");
@@ -168,26 +218,27 @@ function render() {
 async function toggleItem(itemId) {
   state.checklist[itemId] = !state.checklist[itemId];
   render();
-  await persistToday();
+  await persistDay();
 }
 
-async function persistToday() {
-  const today = new Date().toISOString().slice(0, 10);
+async function persistDay() {
+  const date = state.selectedDate;
   try {
     const res = await api("saveLog", {
       name: state.name,
       password: state.password,
-      date: today,
+      date: date,
       checklist: JSON.stringify(state.checklist),
       spend: state.spend || 0,
     });
     state.bestStreak = res.bestStreak;
     state.currentStreak = res.currentStreak;
-    state.balance = res.balance;
+    state.balance = res.balance; // always reflects today's real running balance
     // reflect in local logs cache
-    const idx = state.logs.findIndex((l) => l.date === today);
-    const entry = { date: today, dayNumber: res.dayNumber, checklist: JSON.stringify(state.checklist), spend: state.spend || 0, complete: res.complete };
+    const idx = state.logs.findIndex((l) => l.date === date);
+    const entry = { date: date, dayNumber: res.dayNumber, checklist: JSON.stringify(state.checklist), spend: state.spend || 0, complete: res.complete };
     if (idx === -1) state.logs.push(entry); else state.logs[idx] = entry;
+    computeStreakLocal();
     render();
   } catch (err) {
     toast("Save failed — check connection");
@@ -197,8 +248,8 @@ async function persistToday() {
 
 $("saveSpendBtn").addEventListener("click", async () => {
   state.spend = $("spendInput").value;
-  await persistToday();
-  toast("Spend logged");
+  await persistDay();
+  toast(state.selectedDate === state.today ? "Spend logged" : `Spend logged for ${formatDateLabel(state.selectedDate)}`);
 });
 
 $("addItemBtn").addEventListener("click", async () => {
