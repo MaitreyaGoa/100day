@@ -6,23 +6,15 @@
 // ============================================================
 const API_URL = "https://script.google.com/macros/s/AKfycbzQVO9LcwwOYctnO-r4TOpZe8P2uhkpZDytERcVLACZRO7hIUnvQAc3xqNHn32RFfhADw/exec";
 
-const DEFAULT_ITEMS = [
-  { itemId: "nofood",   label: "No sugar / maida / deep-fried", timeLabel: "All day",        sortHour: -1, builtIn: true },
-  { itemId: "gym",      label: "Gym",                            timeLabel: "",                sortHour: 6,  builtIn: true },
-  { itemId: "breakfast",label: "Breakfast",                      timeLabel: "",                sortHour: 8,  builtIn: true },
-  { itemId: "lunch",    label: "Lunch",                           timeLabel: "",                sortHour: 13, builtIn: true },
-  { itemId: "class1",   label: "Class",                           timeLabel: "3:00–5:00 PM",    sortHour: 15, builtIn: true },
-  { itemId: "class2",   label: "Online Class",                    timeLabel: "7:00–8:30 PM",    sortHour: 19, builtIn: true },
-  { itemId: "norec",    label: "No recreation",                   timeLabel: "Until 10:00 PM",  sortHour: 22, builtIn: true },
-];
-
 let state = {
   name: null,
+  password: null,
   startDate: null,
   dayNumber: 1,
   bestStreak: 0,
   currentStreak: 0,
-  customItems: [],
+  dailyBudget: 150,
+  items: [],
   logs: [],
   checklist: {},
   spend: "",
@@ -56,8 +48,9 @@ async function api(action, params) {
 $("loginForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const name = $("nameInput").value.trim();
-  if (!name) return;
-  await doLogin(name);
+  const password = $("passwordInput").value;
+  if (!name || !password) return;
+  await doLogin(name, password);
 });
 
 $("logoutBtn").addEventListener("click", () => {
@@ -65,29 +58,31 @@ $("logoutBtn").addEventListener("click", () => {
   location.reload();
 });
 
-async function doLogin(name) {
+async function doLogin(name, password) {
   try {
-    const res = await api("login", { name });
+    await api("login", { name, password });
     localStorage.setItem("ddc_name", name);
     state.name = name;
+    state.password = password;
     await loadData();
     showApp();
   } catch (err) {
-    toast("Couldn't reach the log — check setup");
+    toast("Wrong name or password");
     console.error(err);
   }
 }
 
 async function loadData() {
-  const data = await api("getData", { name: state.name });
+  const data = await api("getData", { name: state.name, password: state.password });
   state.startDate = data.startDate;
   state.dayNumber = data.dayNumber;
   state.bestStreak = data.bestStreak || 0;
-  state.customItems = data.customItems || [];
+  state.dailyBudget = data.dailyBudget || 150;
+  state.items = data.customItems || [];
   state.logs = data.logs || [];
   state.checklist = data.todayLog ? JSON.parse(data.todayLog.checklist || "{}") : {};
   state.spend = data.todayLog ? data.todayLog.spend : "";
-  state.balance = data.dayNumber * 150 - state.logs.reduce((sum, l) => sum + (parseFloat(l.spend) || 0), 0);
+  state.balance = data.dayNumber * state.dailyBudget - state.logs.reduce((sum, l) => sum + (parseFloat(l.spend) || 0), 0);
   computeStreakLocal();
   render();
 }
@@ -100,7 +95,7 @@ function showApp() {
 
 // ---------------- RENDER ----------------
 function allItems() {
-  return [...DEFAULT_ITEMS, ...state.customItems].sort((a, b) => (a.sortHour ?? 12) - (b.sortHour ?? 12));
+  return [...state.items].sort((a, b) => (a.sortHour ?? 12) - (b.sortHour ?? 12));
 }
 
 function computeStreakLocal() {
@@ -139,7 +134,8 @@ function render() {
       <div class="tl-time">${item.timeLabel || ""}</div>
       <button class="tl-check ${done ? "done" : ""}" data-id="${item.itemId}"></button>
       <div class="tl-label">${item.label}</div>
-      ${item.builtIn ? "" : `<button class="tl-delete" data-del="${item.itemId}">✕</button>`}
+      <button class="tl-edit" data-edit="${item.itemId}">✎</button>
+      <button class="tl-delete" data-del="${item.itemId}">✕</button>
     `;
     tl.appendChild(row);
   });
@@ -147,17 +143,22 @@ function render() {
   document.querySelectorAll(".tl-check").forEach((btn) => {
     btn.addEventListener("click", () => toggleItem(btn.dataset.id));
   });
+  document.querySelectorAll(".tl-edit").forEach((btn) => {
+    btn.addEventListener("click", () => editItem(btn.dataset.edit));
+  });
   document.querySelectorAll(".tl-delete").forEach((btn) => {
     btn.addEventListener("click", () => deleteItem(btn.dataset.del));
   });
 
-  // banner
+  // banner — matches the server's streak rule: checklist done AND not over the rollover budget
   const total = allItems().length;
   const doneCount = Object.values(state.checklist).filter(Boolean).length;
-  $("completeBanner").classList.toggle("show", total > 0 && doneCount === total);
+  const checklistDone = total > 0 && doneCount === total;
+  $("completeBanner").classList.toggle("show", checklistDone && state.balance >= 0);
 
   // money
   $("spendInput").value = state.spend || "";
+  $("budgetLabel").textContent = `RUNNING BALANCE (₹${state.dailyBudget}/day, rolls over)`;
   const bal = $("balanceFigure");
   bal.textContent = (state.balance >= 0 ? "+₹" : "−₹") + Math.abs(Math.round(state.balance));
   bal.className = "balance-figure " + (state.balance >= 0 ? "pos" : "neg");
@@ -175,6 +176,7 @@ async function persistToday() {
   try {
     const res = await api("saveLog", {
       name: state.name,
+      password: state.password,
       date: today,
       checklist: JSON.stringify(state.checklist),
       spend: state.spend || 0,
@@ -207,8 +209,8 @@ $("addItemBtn").addEventListener("click", async () => {
   const match = timeLabel.match(/(\d{1,2})/);
   if (match) sortHour = parseInt(match[1], 10);
   try {
-    const res = await api("addItem", { name: state.name, label, timeLabel, sortHour });
-    state.customItems.push({ itemId: res.itemId, label, timeLabel, sortHour, builtIn: false });
+    const res = await api("addItem", { name: state.name, password: state.password, label, timeLabel, sortHour });
+    state.items.push({ itemId: res.itemId, label, timeLabel, sortHour });
     $("newItemLabel").value = "";
     $("newItemTime").value = "";
     render();
@@ -218,10 +220,32 @@ $("addItemBtn").addEventListener("click", async () => {
   }
 });
 
+async function editItem(itemId) {
+  const item = state.items.find((i) => i.itemId === itemId);
+  if (!item) return;
+  const newLabel = prompt("Edit item name:", item.label);
+  if (newLabel === null) return;
+  const newTime = prompt("Edit time (blank = untimed, all day, etc):", item.timeLabel || "");
+  if (newTime === null) return;
+  let sortHour = item.sortHour;
+  const match = (newTime || "").match(/(\d{1,2})/);
+  if (match) sortHour = parseInt(match[1], 10);
+  try {
+    await api("updateItem", { name: state.name, password: state.password, itemId, label: newLabel, timeLabel: newTime, sortHour });
+    item.label = newLabel;
+    item.timeLabel = newTime;
+    item.sortHour = sortHour;
+    render();
+    toast("Item updated");
+  } catch (err) {
+    toast("Couldn't update item");
+  }
+}
+
 async function deleteItem(itemId) {
   try {
-    await api("deleteItem", { name: state.name, itemId });
-    state.customItems = state.customItems.filter((i) => i.itemId !== itemId);
+    await api("deleteItem", { name: state.name, password: state.password, itemId });
+    state.items = state.items.filter((i) => i.itemId !== itemId);
     delete state.checklist[itemId];
     render();
   } catch (err) {
@@ -229,18 +253,27 @@ async function deleteItem(itemId) {
   }
 }
 
+$("editBudgetBtn").addEventListener("click", async () => {
+  const newBudget = prompt("Set your daily budget (₹):", state.dailyBudget);
+  if (newBudget === null) return;
+  const num = parseFloat(newBudget);
+  if (isNaN(num) || num < 0) { toast("Enter a valid amount"); return; }
+  try {
+    const res = await api("updateBudget", { name: state.name, password: state.password, budget: num });
+    state.dailyBudget = res.dailyBudget;
+    state.balance = res.balance;
+    render();
+    toast("Budget updated");
+  } catch (err) {
+    toast("Couldn't update budget");
+  }
+});
+
 // ---------------- BOOT ----------------
 (async function boot() {
   const savedName = localStorage.getItem("ddc_name");
   if (savedName) {
     $("nameInput").value = savedName;
-    state.name = savedName;
-    try {
-      await loadData();
-      showApp();
-    } catch (err) {
-      // fall back to login screen if fetch fails (e.g. API not set yet)
-      console.error(err);
-    }
   }
+  // Password is never stored on the device — it must be entered each visit.
 })();
